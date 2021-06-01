@@ -17,7 +17,8 @@ use std::{
     fmt,
     io,
 };
-use flume::{Sender, unbounded};
+// use flume::{Sender, unbounded};
+use crossbeam_channel::{unbounded, Sender};
 
 #[cfg(feature = "num_cpus")]
 fn cpu_count() -> usize {

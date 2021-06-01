@@ -9,7 +9,17 @@ scope = ["scopeguard"]
 recv = ["oneshot"]
 
 [dependencies]
-flume = { version = "0.10", default-features = false }
+crossbeam-channel = "0.5"
+#flume = { version = "0.10", default-features = false }
 num_cpus = { version = "^1", optional = true }
 oneshot = { version = "0.1", optional = true }
 scopeguard = { version = "1.1", optional = true }
+
+[dev-dependencies]
+criterion = "0.3"
+uvth = "4.0"
+threadpool = "1.8"
+
+[[bench]]
+name = "threadpool"
+harness = false
