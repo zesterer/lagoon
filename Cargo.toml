@@ -1,0 +1,15 @@
+[package]
+name = "lagoon"
+version = "0.1.0"
+edition = "2018"
+
+[features]
+default = ["num_cpus", "scope", "recv"]
+scope = ["scopeguard"]
+recv = ["oneshot"]
+
+[dependencies]
+flume = { version = "0.10", default-features = false }
+num_cpus = { version = "^1", optional = true }
+oneshot = { version = "0.1", optional = true }
+scopeguard = { version = "1.1", optional = true }
