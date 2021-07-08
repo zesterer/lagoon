@@ -1,5 +1,8 @@
 # Lagoon
 
+[![Crates.io version](https://img.shields.io/crates/v/lagoon.svg)](https://crates.io/crates/lagoon)
+[![docs.rs](https://docs.rs/lagoon/badge.svg)](https://docs.rs/lagoon/)
+
 Lagoon is a thread pool crate that aims to address many of the problems with existing thread pool crates.
 
 ## Features
@@ -12,3 +15,4 @@ Lagoon is a thread pool crate that aims to address many of the problems with exi
 ## Planned Features
 
 - **Async support for job waiting**: Use the thread pool in an async context!
+
