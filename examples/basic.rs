@@ -1,15 +1,17 @@
-use lagoon::ThreadPool;
+#[cfg(not(feature = "recv"))]
+fn main() {}
 
+#[cfg(feature = "recv")]
 fn main() {
-    let pool = ThreadPool::default();
+    let pool = lagoon::ThreadPool::default();
 
-    let tasks = (0..10)
+    let jobs = (0..10)
         .map(|i| pool.run_recv(move || {
             println!("Hello! i = {}", i);
         }))
         .collect::<Vec<_>>();
 
-    for task in tasks {
-        task.join().unwrap();
+    for job in jobs {
+        job.join().unwrap();
     }
 }

@@ -1,11 +1,13 @@
-use lagoon::ThreadPool;
+#[cfg(not(feature = "scope"))]
+fn main() {}
 
+#[cfg(feature = "scope")]
 fn main() {
     let mut data = (0..100).collect::<Vec<u32>>();
 
-    ThreadPool::default().scoped(|s| {
+    lagoon::ThreadPool::default().scoped(|s| {
         for x in data.iter_mut() {
-            s.run(move || *x *= *x).unwrap();
+            s.run(move || *x *= *x);
         }
     });
 

@@ -1,3 +1,5 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
 use super::*;
 
 use std::{
@@ -7,6 +9,32 @@ use std::{
     sync::{Arc, atomic::{AtomicUsize, Ordering}},
 };
 
+/// A scope within which jobs that refer to their parent scope may safely be spawned.
+///
+/// The example below demonstrates how scoped threads can easily be used to perform safe, ergonomic parallel data
+/// processing.
+///
+/// *Note: This is a contrived example. The overhead of spawning jobs for each element of the vector will far outweigh
+/// the cost of each operation in this case.*
+///
+/// ```
+/// // A vector of the numbers 0 to 99
+/// let mut data = (0..100).collect::<Vec<u32>>();
+///
+/// lagoon::ThreadPool::default().scoped(|s| {
+///     // For each element in the vector...
+///     for x in data.iter_mut() {
+///         // ...spawn a job that squares that element
+///         s.run(move || *x *= *x);
+///     }
+/// });
+///
+/// // Demonstrate that the elements have indeed been squared
+/// assert!((0..100)
+///     .map(|x| x * x)
+///     .zip(data.into_iter())
+///     .all(|(x, y)| x == y));
+/// ```
 pub struct Scope<'pool, 'scope> {
     pool: &'pool ThreadPool,
     parent: Arc<(Thread, AtomicUsize)>,
@@ -14,6 +42,7 @@ pub struct Scope<'pool, 'scope> {
 }
 
 impl<'pool, 'scope> Scope<'pool, 'scope> {
+    /// Enqueue a function that may refer to its parent scope to be executed as a job when a thread is free to do so.
     pub fn run<F: FnOnce() + Send + 'scope>(&self, f: F) {
         let parent = self.parent.clone();
         parent.1.fetch_add(1, Ordering::Acquire);
@@ -33,11 +62,14 @@ impl<'pool, 'scope> Scope<'pool, 'scope> {
         })
     }
 
+    /// Enqueue a function that may refer to its parent scope to be executed as a job when a thread is free to do so,
+    /// returning a handle that allows retrieval of the return value of the function.
     #[cfg(feature = "recv")]
-    pub fn run_recv<F: FnOnce() -> R + Send + 'scope, R: Send + 'scope>(&self, f: F) -> recv::TaskHandle<R> {
+    #[cfg_attr(docsrs, doc(cfg(feature = "recv")))]
+    pub fn run_recv<F: FnOnce() -> R + Send + 'scope, R: Send + 'scope>(&self, f: F) -> recv::JobHandle<R> {
         let (tx, rx) = oneshot::channel();
         self.run(move || { let _ = tx.send(f()); });
-        recv::TaskHandle::new(rx)
+        recv::JobHandle::new(rx)
     }
 }
 

@@ -1,4 +1,29 @@
-#![feature(once_cell)]
+//! Lagoon is a thread pool crate that aims to address many of the problems with existing thread pool crates.
+//!
+//! ## Features
+//!
+//! - **Scoped jobs**: Safely spawn jobs that have access to their parent scope!
+//! - **Job handles**: Receive the result of a job when it finishes, or wait on it to finish!
+//! - **Global pool**: A pay-for-what-you-use global thread pool that avoids dependencies fighting over resources!
+//! - **Customise thread attributes**: Specify thread name, stack size, etc.
+//!
+//! ```ignore
+//! let pool = lagoon::ThreadPool::default();
+//!
+//! // Spawn some jobs that notify us when they're finished
+//! let jobs = (0..10)
+//!     .map(|i| pool.run_recv(move || {
+//!         println!("Hello! i = {}", i);
+//!     }))
+//!     .collect::<Vec<_>>();
+//!
+//! // Wait for all jobs to finish
+//! for job in jobs {
+//!     job.join().unwrap();
+//! }
+//! ```
+
+#![deny(missing_docs)]
 
 #[cfg(feature = "scope")]
 mod scope;
@@ -6,12 +31,13 @@ mod scope;
 mod recv;
 
 #[cfg(feature = "scope")]
+#[cfg_attr(docsrs, doc(cfg(feature = "scope")))]
 pub use scope::Scope;
 #[cfg(feature = "recv")]
-pub use recv::TaskHandle;
+#[cfg_attr(docsrs, doc(cfg(feature = "recv")))]
+pub use recv::JobHandle;
 
 use std::{
-    lazy::SyncLazy,
     thread::{self, JoinHandle},
     error,
     fmt,
@@ -29,16 +55,17 @@ fn cpu_count() -> usize {
 fn cpu_count() -> usize {
     std::thread::available_concurrency()
         .map(|n| n.get())
-        .unwrap_or(ThreadPool::DEFAULT_THREADS)
+        .unwrap_or(ThreadPool::DEFAULT_THREAD_COUNT)
 }
 
 /// An error that may be produced when creating a [`ThreadPool`].
 #[derive(Debug)]
 pub enum Error {
+    /// An IO error occurred when attempting to spawn a thread.
     Io(io::Error),
     /// The thread pool has no threads.
     NoThreads,
-    /// A timeout occurred when attempting to join a task.
+    /// A timeout occurred when attempting to join a job.
     Timeout,
 }
 
@@ -54,15 +81,20 @@ impl fmt::Display for Error {
 
 impl error::Error for Error {}
 
-struct Task {
+struct Job {
     f: Box<dyn FnOnce() + Send>,
 }
 
-static GLOBAL: SyncLazy<ThreadPool> = SyncLazy::new(|| ThreadPool::default());
+// TODO: Use when stable, see https://github.com/rust-lang/rust/issues/74465
+//static GLOBAL: std::lazy::SyncLazy<ThreadPool> = std::lazy::SyncLazy::new(|| ThreadPool::default());
 
-/// A pool of threads that may be used to execute tasks.
+lazy_static::lazy_static! {
+    static ref GLOBAL: ThreadPool = ThreadPool::default();
+}
+
+/// A pool of threads that may be used to execute jobs.
 pub struct ThreadPool {
-    tx: Sender<Task>,
+    tx: Sender<Job>,
     handles: Vec<JoinHandle<()>>,
 }
 
@@ -73,7 +105,7 @@ impl Default for ThreadPool {
 impl ThreadPool {
     /// The default number of threads that will be used if the available concurrency of the environment cannot be
     /// determined automatically.
-    pub const DEFAULT_THREADS: usize = 8;
+    pub const DEFAULT_THREAD_COUNT: usize = 8;
 
     /// Returns a reference to the global [`ThreadPool`].
     ///
@@ -90,26 +122,34 @@ impl ThreadPool {
     /// Returns the number of threads in this pool.
     pub fn thread_count(&self) -> usize { self.handles.len() }
 
-    /// Returns the number of tasks waiting to be executed.
+    /// Returns the number of jobs waiting to be executed.
     pub fn queue_len(&self) -> usize { self.tx.len() }
 
-    /// Enqueue a function to be executed when a thread is free to do so.
+    /// Enqueue a function to be executed as a job when a thread is free to do so.
+    ///
+    /// ```
+    /// let pool = lagoon::ThreadPool::default();
+    ///
+    /// for i in 0..10 {
+    ///     pool.run(move || println!("I am the {}th job!", i));
+    /// }
+    /// ```
     pub fn run<F: FnOnce() + Send + 'static>(&self, f: F) {
-        self.tx.send(Task { f: Box::new(f) }).unwrap()
+        self.tx.send(Job { f: Box::new(f) }).unwrap()
     }
 
-    /// Enqueue a function to be executed when a thread is free to do so, returning a handle that allows retrieval of
-    /// the return value of the function.
+    /// Enqueue a function to be executed as a job when a thread is free to do so, returning a handle that allows
+    /// retrieval of the return value of the function.
     #[cfg(feature = "recv")]
-    pub fn run_recv<F: FnOnce() -> R + Send + 'static, R: Send + 'static>(&self, f: F) -> recv::TaskHandle<R> {
+    pub fn run_recv<F: FnOnce() -> R + Send + 'static, R: Send + 'static>(&self, f: F) -> recv::JobHandle<R> {
         let (tx, rx) = oneshot::channel();
         self.run(move || { let _ = tx.send(f()); });
-        recv::TaskHandle::new(rx)
+        recv::JobHandle::new(rx)
     }
 
-    /// Signal to threads that they should stop, then wait for them to finish processing tasks.
+    /// Signal to threads (not jobs) that they should stop, then wait for them to finish processing jobs.
     ///
-    /// All outstanding tasks will be executed before this function returns.
+    /// All outstanding jobs will be executed before this function returns.
     pub fn join_all(self) -> thread::Result<()> {
         let Self { tx, handles } = self;
         drop(tx);
@@ -121,7 +161,8 @@ impl ThreadPool {
 
     /// Create a scope that allows the spawning of threads with safe access to the current scope.
     ///
-    /// This function will wait for all tasks created in the scope to finish before continuing.
+    /// This function will wait for all jobs created in the scope to finish before continuing. See [`Scope`] for more
+    /// information about scoped jobs.
     #[cfg(feature = "scope")]
     pub fn scoped<'pool, 'scope, F: FnOnce(scope::Scope<'pool, 'scope>) -> R, R>(&'pool self, f: F) -> R {
         scope::run(self, f)
@@ -137,17 +178,21 @@ pub struct ThreadPoolBuilder {
 }
 
 impl ThreadPoolBuilder {
-    /// Configure the [`ThreadPool`] with the given number of threads.
+    /// Configure the [`ThreadPool`] with the given number of threads. If unspecified, the thread pool will attempt to
+    /// detect the number of hardware threads available to the process and use that. If this also fails,
+    /// [`ThreadPool::DEFAULT_THREAD_COUNT`] will be used.
     pub fn with_thread_count(self, thread_count: usize) -> Self {
         Self { thread_count: Some(thread_count), ..self }
     }
 
-    /// Give the threads owned by this [`ThreadPool`] the given name.
+    /// Give the threads owned by this [`ThreadPool`] the given name. If unspecified, the default name will be the same
+    /// as those created by [`std::thread::spawn`].
     pub fn with_thread_name(self, name: String) -> Self {
         Self { thread_name: Some(name), ..self }
     }
 
-    /// Give the threads owned by this [`ThreadPool`] a specific stack size.
+    /// Give the threads owned by this [`ThreadPool`] a specific stack size. If unspecified, the default stack size
+    /// will be the same as those created by [`std::thread::spawn`].
     pub fn with_thread_stack_size(self, size: usize) -> Self {
         Self { thread_stack_size: Some(size), ..self }
     }
@@ -178,10 +223,10 @@ impl ThreadPoolBuilder {
                         None => builder,
                     };
                     builder.spawn(move || {
-                        while let Ok(task) = rx.recv() {
-                            let task = std::panic::AssertUnwindSafe(task);
+                        while let Ok(job) = rx.recv() {
+                            let job = std::panic::AssertUnwindSafe(job);
                             let _ = std::panic::catch_unwind(move || {
-                                (task.0.f)();
+                                (job.0.f)();
                             });
                         }
                     }).map_err(Error::Io)
