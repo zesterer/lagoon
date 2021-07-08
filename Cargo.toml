@@ -25,6 +25,7 @@ scopeguard = { version = "1.1", optional = true }
 criterion = "0.3"
 uvth = "4.0"
 threadpool = "1.8"
+rusty_pool = "0.6.0"
 
 [[bench]]
 name = "threadpool"

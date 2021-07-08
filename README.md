@@ -39,6 +39,22 @@ assert!((0..100)
 
 - **Async support for job waiting**: Use the thread pool in an async context!
 
+## Performance
+
+Lagoon has very competitive performance. Below are timings required for each thread pool crate to spawn a new pool,
+execute 100,000 trivial jobs, and then finish executing (i.e: smaller is better) compared to common alternative crates.
+
+# <img src="misc/perf.svg" alt="Benchmark, demonstrating Lagoon's performance compared to other thread pool crates"/>
+
+```
+Spawning 100000 trivial tasks/lagoon     time:   [15.124 ms 16.437 ms 17.871 ms]
+Spawning 100000 trivial tasks/threadpool time:   [59.108 ms 59.549 ms 59.989 ms]
+Spawning 100000 trivial tasks/uvth       time:   [11.494 ms 12.598 ms 13.750 ms]
+Spawning 100000 trivial tasks/rusty_pool time:   [40.203 ms 44.778 ms 49.612 ms]
+```
+
+Benchmarks were run on an AMD Ryzen 7 3700x with 16 threads.
+
 ## License
 
 Lagoon is licensed under the MIT license (see `LICENSE`) in the main repository.
