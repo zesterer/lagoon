@@ -12,7 +12,7 @@ use std::{
 /// A scope within which jobs that refer to their parent scope may safely be spawned.
 ///
 /// The example below demonstrates how scoped threads can easily be used to perform safe, ergonomic parallel data
-/// processing.
+/// processing, similar to [`rayon`](https://github.com/rayon-rs/rayon/).
 ///
 /// *Note: This is a contrived example. The overhead of spawning jobs for each element of the vector will far outweigh
 /// the cost of each operation in this case.*
