@@ -30,3 +30,7 @@ rusty_pool = "0.6.0"
 [[bench]]
 name = "threadpool"
 harness = false
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
