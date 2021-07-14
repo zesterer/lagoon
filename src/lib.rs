@@ -57,6 +57,11 @@ pub fn available_concurrency() -> Option<usize> {
     Some(num_cpus::get())
 }
 
+/// Attempt to determine the available concurrency of the host system.
+///
+/// In most cases, this corresponds to the number of CPU cores that are available to the program. If the `num_cpus`
+/// feature is enabled (it is by default) the [`num_cpus`](https://crates.io/crates/num_cpus) crate will be used to
+/// determine this value. Otherwise, the nightly-only `std::thread::available_concurrency` function will be used.
 #[cfg(not(feature = "num_cpus"))]
 pub fn available_concurrency() -> Option<usize> {
     std::thread::available_concurrency().map(|n| n.get())
