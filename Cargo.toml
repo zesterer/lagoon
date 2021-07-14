@@ -15,7 +15,7 @@ recv = ["oneshot"]
 
 [dependencies]
 crossbeam-channel = "0.5"
-lazy_static = "1.4"
+spin = { version = "0.9", features = ["std"] }
 #flume = { version = "0.10", default-features = false }
 num_cpus = { version = "^1", optional = true }
 oneshot = { version = "0.1", optional = true }

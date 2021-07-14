@@ -1,5 +1,5 @@
 #[cfg(not(feature = "scope"))]
-fn main() {}
+fn main() { panic!("This example requires the `scope` feature") }
 
 #[cfg(feature = "scope")]
 fn main() {

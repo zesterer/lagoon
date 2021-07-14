@@ -1,5 +1,5 @@
 #[cfg(not(feature = "recv"))]
-fn main() {}
+fn main() { panic!("This example requires the `recv` feature") }
 
 #[cfg(feature = "recv")]
 fn main() {

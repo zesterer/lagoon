@@ -47,16 +47,19 @@ use std::{
 // use flume::{Sender, unbounded};
 use crossbeam_channel::{unbounded, Sender};
 
+/// Attempt to determine the available concurrency of the host system.
+///
+/// In most cases, this corresponds to the number of CPU cores that are available to the program. If the `num_cpus`
+/// feature is enabled (it is by default) the [`num_cpus`](https://crates.io/crates/num_cpus) crate will be used to
+/// determine this value. Otherwise, the nightly-only `std::thread::available_concurrency` function will be used.
 #[cfg(feature = "num_cpus")]
-fn cpu_count() -> usize {
-    num_cpus::get()
+pub fn available_concurrency() -> Option<usize> {
+    Some(num_cpus::get())
 }
 
 #[cfg(not(feature = "num_cpus"))]
-fn cpu_count() -> usize {
-    std::thread::available_concurrency()
-        .map(|n| n.get())
-        .unwrap_or(ThreadPool::DEFAULT_THREAD_COUNT)
+pub fn available_concurrency() -> Option<usize> {
+    std::thread::available_concurrency().map(|n| n.get())
 }
 
 /// An error that may be produced when creating a [`ThreadPool`].
@@ -89,9 +92,9 @@ struct Job {
 // TODO: Use when stable, see https://github.com/rust-lang/rust/issues/74465
 //static GLOBAL: std::lazy::SyncLazy<ThreadPool> = std::lazy::SyncLazy::new(|| ThreadPool::default());
 
-lazy_static::lazy_static! {
-    static ref GLOBAL: ThreadPool = ThreadPool::default();
-}
+// I'll try spinning, that's a good trick! Actually, this isn't so bad: instead of spinning in a hot loop, we just
+// yield to the scheduler every time we fail to access the global pool. This prevents priority inversion.
+static GLOBAL: spin::once::Once<ThreadPool, spin::Yield> = spin::once::Once::new();
 
 /// A pool of threads that may be used to execute jobs.
 pub struct ThreadPool {
@@ -108,12 +111,31 @@ impl ThreadPool {
     /// determined automatically.
     pub const DEFAULT_THREAD_COUNT: usize = 8;
 
-    /// Returns a reference to the global [`ThreadPool`].
+    /// Returns a reference to the global [`ThreadPool`], instantiating as with [`ThreadPool::default`] if it is not
+    /// already initialized.
     ///
     /// This should be used when you don't require any specific thread pool configuration to avoid multiple thread
-    /// pools fighting for scheduler time. The global pool is created with the default configuration, i.e:
-    /// [`ThreadPool::default`].
-    pub fn global() -> &'static Self { &*GLOBAL }
+    /// pools fighting for scheduler time.
+    pub fn global() -> &'static Self { Self::global_with_builder(ThreadPoolBuilder::default()) }
+
+    /// Returns a reference to the global [`ThreadPool`], initializing it with the given [`ThreadPoolBuilder`] if it
+    /// is not already initialized.
+    ///
+    /// Do *not* use this function if you are writing a library. Use [`ThreadPool::global`] instead so that the final
+    /// binary crate is the one to determine the thread pool configuration (the end developer likely knows more about
+    /// their specific threading requirements than you do and can use this information to optimise thread pool
+    /// performance and minimise resource contention).
+    ///
+    /// If your application has specific pool requirements (for example, most games require thread pools to use N - 1
+    /// threads to ensure that at least one core is free at any given time to keep the main thread running smoothly
+    /// without stuttering) you should use this function *as early as possible* in the program's execution (i.e: at the
+    /// top of the `main` function) to avoid dependencies initializing it first.
+    ///
+    /// Note additionally that the configuration you choose might interfere with dependencies that also use the global
+    /// thread pool. Choose sensible, accomodating defaults where possible.
+    pub fn global_with_builder(builder: ThreadPoolBuilder) -> &'static Self {
+        GLOBAL.call_once(|| builder.finish().expect("Failed to initialise global thread pool"))
+    }
 
     /// Begin building a new [`ThreadPool`].
     pub fn build() -> ThreadPoolBuilder {
@@ -201,7 +223,8 @@ impl ThreadPoolBuilder {
     /// Finish configuration, returning a [`ThreadPool`].
     pub fn finish(self) -> Result<ThreadPool, Error> {
         let thread_count = self.thread_count
-            .unwrap_or(cpu_count());
+            .or_else(|| available_concurrency())
+            .unwrap_or(ThreadPool::DEFAULT_THREAD_COUNT);
 
         if thread_count == 0 {
             return Err(Error::NoThreads);
